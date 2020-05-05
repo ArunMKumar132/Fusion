@@ -1,0 +1,14 @@
+SELECT (SELECT name FROM hr_organization_units_f_tl WHERE organization_id = :P_Business_Unit
+		AND language='US' AND TRUNC(SYSDATE) BETWEEN effective_start_date AND effective_end_date  )
+	,DECODE(:P_Report_Format,'CS','Customer Summary','IS','Invoice Summary','')
+	,DECODE(:P_AgeBy,'DUEDATE','Due Date','INVDATE','Invoice Date')
+	,SUBSTR(:P_Report_Date, 1,10 )
+	,:P_Bucket_Name
+, (SELECT PARTY_NAME FROM hz_parties where party_number  = :P_Party_Name_From) FROM_PARTY
+	, (SELECT PARTY_NAME FROM hz_parties where party_number  = :P_Party_Name_TO) TO_PARTY
+	,:P_Ex_UNID
+	, (SELECT LISTAGG(NAME,';') WITHIN GROUP (ORDER BY NAME DESC) FROM ar_receipt_methods 
+	WHERE receipt_method_id   IN ( :P_Receipt_Method ))  as "METHOD"
+	
+	
+FROM dual

@@ -1,0 +1,285 @@
+-- Custom Aging Bucket
+SELECT *
+FROM (
+SELECT "BU NAME",
+     party_number,
+	 party_name,
+	 "Transaction Number",
+	 "Currency Code",
+	 "Transaction Date",
+	 "GL Date",
+	 "Transaction Type Name",
+	 amount_due_original,
+	 "Invoice Due Date",
+     "Payment Terms",
+	 (SELECT fcl.lookup_code
+		FROM fnd_common_lookups fcl
+			,hr_organization_units_f_tl haot
+		WHERE fcl.lookup_type = 'PSA_AR_PAYMENT_TERM_LOOKUP'
+		AND haot.LANGUAGE ='US'
+		AND haot.organization_id  = :P_Business_Unit
+		AND fcl.description = haot.name
+		AND fcl.meaning = "Payment Terms")  as "Credit Terms",
+     total_days,
+	 amt_due_remaining,
+     CASE
+         WHEN total_days <= (SELECT days_to 
+								FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+								WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 0
+									AND aab.bucket_name = :P_Bucket_Name)    THEN amt_due_remaining ELSE 0
+		 
+     END "Bucket 0",
+     CASE
+         WHEN total_days BETWEEN (SELECT days_start 
+								FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+								WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 1
+									AND aab.bucket_name = :P_Bucket_Name) 
+						AND 	(SELECT days_to 
+									FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+									WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 1
+									AND aab.bucket_name = :P_Bucket_Name) THEN amt_due_remaining ELSE 0
+     END "Bucket 1",
+     CASE
+         WHEN total_days BETWEEN (SELECT days_start 
+								FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+								WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 2
+									AND aab.bucket_name = :P_Bucket_Name) 
+						AND 	(SELECT days_to 
+									FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+									WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 2
+									AND aab.bucket_name = :P_Bucket_Name) THEN amt_due_remaining ELSE 0
+     END "Bucket 2",
+     CASE
+         WHEN total_days BETWEEN  (SELECT days_start 
+								FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+								WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 3
+									AND aab.bucket_name = :P_Bucket_Name) 
+						AND 	(SELECT days_to 
+									FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+									WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 3
+									AND aab.bucket_name = :P_Bucket_Name) THEN amt_due_remaining ELSE 0
+     END "Bucket 3",
+     CASE
+         WHEN total_days BETWEEN (SELECT days_start 
+								FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+								WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 4
+									AND aab.bucket_name = :P_Bucket_Name) 
+						AND 	(SELECT days_to 
+									FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+									WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 4
+									AND aab.bucket_name = :P_Bucket_Name) THEN amt_due_remaining ELSE 0
+     END "Bucket 4",
+	 CASE
+         WHEN total_days BETWEEN (SELECT days_start 
+								FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+								WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 5
+									AND aab.bucket_name = :P_Bucket_Name) 
+						AND 	(SELECT days_to 
+									FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+									WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 5
+									AND aab.bucket_name = :P_Bucket_Name) THEN amt_due_remaining ELSE 0
+     END "Bucket 5",
+     CASE
+         WHEN total_days > (SELECT days_start 
+								FROM ar_aging_bucket_lines_b  aabl, ar_aging_buckets  aab
+								WHERE aab.aging_bucket_id = aabl.aging_bucket_id  
+									AND aabl.bucket_sequence_num = 6
+									AND aab.bucket_name = :P_Bucket_Name) THEN amt_due_remaining ELSE 0
+     END "Bucket 6",
+	 "Bill_To_Site" ,
+	 "Ship_To_Customer",
+     "Ship_to_Customer_Num",
+	 "Ship_to_Site"
+ FROM
+     (
+         SELECT
+             rt.name                            "Transaction Type Name",
+             hp.party_name,
+			 hp.party_number,
+             SUBSTR(aps.due_date,1,10)						"Invoice Due Date",
+             hps_bill.party_site_number,
+             pt.name                            "Payment Terms",
+             SUBSTR(aps.gl_date,1,10)						"GL Date",
+             TO_DATE(TRUNC(:P_Report_Date)) - DECODE(:P_AgeBy,'DUEDATE',aps.due_date,'INVDATE',ra.trx_date,aps.due_date) total_days,
+             SUBSTR(ra.trx_date,1,10)                        "Transaction Date",
+             ra.trx_number                      "Transaction Number",
+			 ra.invoice_currency_code			"Currency Code",
+			 --ra.br_amount 	"Invoice Amount",
+             aps.amount_due_original,
+             ( aps.amount_due_original - nvl( (
+                 SELECT
+                     SUM(nvl(ara.amount_applied,0) )
+                 FROM
+                     ar_receivable_applications_all ara
+                 WHERE
+                     ara.applied_customer_trx_id = aps.customer_trx_id
+                     AND ara.display = 'Y'
+                     AND trunc(ara.gl_date) <=TRUNC(:P_Report_Date)
+             ),0) + nvl( (
+                 SELECT
+                     SUM(nvl(aaa.amount,0) )
+                 FROM
+                     ar_adjustments_all aaa
+                 WHERE
+                     aaa.payment_schedule_id = aps.payment_schedule_id
+                     AND aaa.gl_date <=TRUNC(:P_Report_Date)
+             ),0) ) amt_due_remaining,
+            -- hc.orig_system_reference           "Orig_Sys_Bill_To_Cust_Ref",
+             --hcasa_bill.orig_system_reference   "Orig_Sys_Bill_to_Cus_Add_Ref",
+             --hc.orig_system_reference           "Orig_Sys_Ship_to_Cus_Acc_Ref",
+             --hcasa_bill.orig_system_reference   "Orig_Ship_Cus_Acc_Add_Ref",
+			 hps_bill.party_site_number "Bill_To_Site",
+			 haot.name "BU NAME",
+			 hp1.party_name "Ship_To_Customer",
+			 hp1.party_number "Ship_to_Customer_Num",
+			 hps1.party_site_number "Ship_to_Site"
+         FROM
+             ra_customer_trx_all ra,
+             ar_payment_schedules_all aps,
+             ra_cust_trx_types_all rt,
+             hz_cust_accounts hc,
+             hz_parties hp,
+             hz_cust_acct_sites_all hcasa_bill,
+             hz_cust_site_uses_all hcsua_bill,
+             hz_party_sites hps_bill,
+             ra_terms pt,
+			 hr_organization_units_f_tl haot,
+			 --hz_cust_accounts hc1,
+			 hz_parties hp1 ,
+			 hz_party_site_uses hpsu,
+			 hz_party_sites hps1
+			 
+         WHERE
+             1 = 1
+			--AND ra.trx_number in ( '20000697','20000713')
+             AND ra.term_id = pt.term_id (+)
+             AND ra.customer_trx_id = aps.customer_trx_id
+             AND ra.org_id = aps.org_id
+             AND ra.complete_flag = 'Y'
+
+--AND rl.line_type IN ('FREIGHT', 'LINE')
+             --AND ra.cust_trx_type_id = rt.cust_trx_type_id --
+			 AND ra.cust_trx_type_seq_id = rt.cust_trx_type_seq_id
+             AND ra.bill_to_customer_id = hc.cust_account_id
+             AND hc.status = 'A'
+             AND hp.party_id = hc.party_id
+             AND hcasa_bill.cust_account_id = ra.bill_to_customer_id
+             AND hcasa_bill.cust_acct_site_id = hcsua_bill.cust_acct_site_id
+             AND hcsua_bill.site_use_code = 'BILL_TO'
+             AND hcsua_bill.site_use_id = ra.bill_to_site_use_id
+             AND hps_bill.party_site_id = hcasa_bill.party_site_id
+             AND hcasa_bill.status = 'A'
+             AND hcsua_bill.status = 'A'
+             AND aps.amount_due_remaining <> 0
+             AND aps.status = 'OP'
+             AND aps.class != 'PMT'
+             AND aps.gl_date <=TRUNC(:P_Report_Date)
+             --AND ra.org_id =:p_org_id
+			 AND ra.org_id = haot.organization_id
+			 AND haot.LANGUAGE='US'
+			 AND haot.organization_id  = NVL(:P_Business_Unit,haot.organization_id)
+			 AND ra.ship_to_party_id = hp1.party_id(+) 
+			 AND ra.ship_to_party_site_use_id = hpsu.party_site_use_id(+)
+			 AND hps1.party_site_id(+) =hpsu.party_site_id
+			 AND 'IS' = :P_Report_Format
+			 AND hp.party_number BETWEEN NVL(:P_Party_Name_From,hp.party_number) AND NVL(:P_Party_Name_To,hp.party_number)			
+
+			
+        /*  ORDER BY
+             ra.trx_number */
+UNION ALL
+  SELECT
+        'Payment'     "Transaction Type Name",
+         NVL(party.party_name,'Un-Identified') party_name,
+		 party.party_number,
+         SUBSTR(acra.receipt_date,1,10)						"Invoice Due Date",
+         '' party_site_number,
+         ''                          "Payment Terms",
+         SUBSTR(aps.gl_date,1,10)						"GL Date",
+         TO_DATE(TRUNC(:P_Report_Date)) - aps.due_date total_days,
+         SUBSTR(acra.receipt_date,1,10)                        "Transaction Date",
+         acra.receipt_number                      "Transaction Number",
+		 acra.currency_code			"Currency Code",
+		 aps.amount_due_original,
+             ( aps.amount_due_original - nvl( (
+                 SELECT
+                     SUM(nvl(ara.amount_applied,0) )
+                 FROM
+                     ar_receivable_applications_all ara
+                 WHERE
+                     ara.applied_customer_trx_id = aps.customer_trx_id
+                     AND ara.display = 'Y'
+                     AND trunc(ara.gl_date) <=TRUNC(:P_Report_Date)
+             ),0) + nvl( (
+                 SELECT
+                     SUM(nvl(aaa.amount,0) )
+                 FROM
+                     ar_adjustments_all aaa
+                 WHERE
+                     aaa.payment_schedule_id = aps.payment_schedule_id
+                     AND aaa.gl_date <=TRUNC(:P_Report_Date)
+             ),0) ) amt_due_remaining,
+         '' "Bill_To_Site",
+		'' "BU NAME",
+		'' "Ship_To_Customer",
+		'' "Ship_to_Customer_Num",
+		'' "Ship_to_Site"
+
+FROM ar_cash_receipts_all acra
+	,ar_cash_receipt_history_all acrh
+	,ar_payment_schedules_all aps
+	,hz_cust_accounts cust_acct
+	, hz_parties party
+	, hr_organization_units_f_tl haot
+	--,ar_receipt_methods arm
+WHERE 1=1
+--AND receipt_number IN ( 'Ch001' ,'DUMMY-003')
+AND  acra.status  IN  (SELECT 'UNAPP' FROM DUAL WHERE :P_Ex_UNID = 'N' 
+						UNION ALL 
+					  SELECT 'UNAPP' FROM DUAL WHERE :P_Ex_UNID = 'Y' 
+						UNION ALL 
+					  SELECT 'UNID' FROM DUAL WHERE :P_Ex_UNID = 'N' 
+					 )
+AND acra.cash_receipt_id = acrh.cash_receipt_id 
+AND acrh.status NOT IN ('REVERSED')
+and acrh.current_record_flag = 'Y'
+AND  EXISTS  (SELECT 1
+               FROM xla_transaction_entities xlatrans
+                  , xla_events xlaevents
+                  , xla_ae_headers ae
+              WHERE xlatrans.source_id_int_1 = acra.cash_receipt_id
+                AND xlatrans.legal_entity_id = acra.legal_entity_id
+                AND xlaevents.entity_id = xlatrans.entity_id
+                AND xlaevents.application_id = xlatrans.application_id
+                AND xlaevents.event_id = ae.event_id
+                AND xlaevents.application_id = ae.application_id
+                AND xlatrans.entity_code = 'RECEIPTS'
+                AND ae.gl_transfer_status_code = 'Y'
+          	) 
+AND acra.cash_receipt_id = aps.cash_receipt_id
+AND aps.customer_id = cust_acct.cust_account_id(+)
+AND cust_acct.party_id = party.party_id(+)
+AND aps.gl_date <=TRUNC(:P_Report_Date)
+AND 'IS' = :P_Report_Format
+AND NVL(party.party_number,'-999') BETWEEN NVL(:P_Party_Name_From,NVL(party.party_number,'-999')) AND NVL(:P_Party_Name_To,NVL(party.party_number,'-999'))	
+AND acra.org_id =  haot.organization_id
+AND haot.LANGUAGE ='US'
+AND haot.organization_id  = NVL(:P_Business_Unit,haot.organization_id)
+--AND acra.receipt_method_id  = arm.receipt_method_id
+--OR acra.receipt_method_id  NOT IN ( :P_Receipt_Method||'-99')
+AND ( acra.receipt_method_id  NOT IN ( :P_Receipt_Method )   OR 1 IN ( :P_Receipt_Method||'1' ) )
+
+     ) a1 
+	 )
+	 order by "Transaction Number"
